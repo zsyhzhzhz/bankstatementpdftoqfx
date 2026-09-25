@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对账单 PDF 转 QFX（单文件离线版）</title>
+<style>
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", Segoe UI, sans-serif;
+  background: #f4f5f7;
+  color: #1f2328;
+  margin: 0;
+  padding: 24px;
+}
+
+.container { max-width: 980px; margin: 0 auto; }
+
+h1 { font-size: 22px; margin-bottom: 4px; }
+
+.subtitle { color: #6b7280; margin-top: 0; margin-bottom: 20px; font-size: 14px; }
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+
+.card h2 { margin-top: 0; font-size: 16px; }
+
+.upload-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+button {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+button:hover { background: #1d4ed8; }
+button:disabled { background: #9ca3af; cursor: not-allowed; }
+
+.status { font-size: 13px; color: #6b7280; }
+.status.error { color: #dc2626; }
+.status.ok { color: #16a34a; }
+
+.warnings {
+  margin-top: 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.warnings ul { margin: 4px 0 0 18px; padding: 0; }
+
+.hidden { display: none !important; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 18px; }
+
+.grid label { display: flex; flex-direction: column; font-size: 13px; color: #374151; gap: 4px; }
+
+input, select {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.hint { font-size: 13px; color: #6b7280; margin-top: 0; }
+
+.table-wrap {
+  overflow-x: auto;
+  max-height: 480px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+
+thead th {
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+tbody td { padding: 4px 6px; border-bottom: 1px solid #f1f2f4; }
+
+tbody td input { width: 100%; min-width: 60px; border: 1px solid transparent; background: transparent; }
+tbody td input:focus { border: 1px solid #93c5fd; background: #fff; }
+
+tbody tr.invalid td { background: #fef2f2; }
+
+.row-desc input { min-width: 220px; }
+
+.table-actions { margin-top: 10px; display: flex; align-items: center; gap: 12px; }
+
+.remove-btn { background: #fff; color: #dc2626; border: 1px solid #fca5a5; padding: 3px 8px; font-size: 12px; }
+.remove-btn:hover { background: #fef2f2; }
+
+.offline-note {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: -6px;
+  margin-bottom: 20px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>银行对账单 PDF → QFX 转换器（单文件离线版）</h1>
+  <p class="subtitle">全部在浏览器本地完成解析和生成，PDF 不会上传到任何服务器。上传 PDF → 核对/修正 → 生成 QFX。</p>
+  <p class="offline-note">本文件依赖同目录下的 <code>vendor/pdfjs/</code> 文件夹（PDF 解析引擎），请勿单独移动 index.html，需连同整个项目文件夹一起复制/分发。</p>
+
+  <section class="card">
+    <h2>① 上传 PDF</h2>
+    <div class="upload-row">
+      <input type="file" id="pdfFile" accept="application/pdf">
+      <button id="parseBtn">解析 PDF</button>
+      <span id="parseStatus" class="status"></span>
+    </div>
+    <div id="warnings" class="warnings hidden"></div>
+  </section>
+
+  <section class="card hidden" id="accountSection">
+    <h2>② 核对账户信息</h2>
+    <div class="grid">
+      <label>银行名称
+        <input type="text" id="bankName">
+      </label>
+      <label>账户类型
+        <select id="accountType">
+          <option value="BANK">储蓄卡 / 借记卡（BANK）</option>
+          <option value="CC">信用卡（CC）</option>
+        </select>
+      </label>
+      <label id="bankAcctTypeWrap">账户子类型
+        <select id="bankAcctType">
+          <option value="CHECKING">CHECKING（活期/借记）</option>
+          <option value="SAVINGS">SAVINGS（储蓄）</option>
+        </select>
+      </label>
+      <label>账号 *
+        <input type="text" id="accountNumber" placeholder="必填">
+      </label>
+      <label id="bankIdWrap">联行号/开户行代码
+        <input type="text" id="bankId" placeholder="可留空，储蓄卡建议填写">
+      </label>
+      <label>币种
+        <input type="text" id="currency" value="CNY" maxlength="3">
+      </label>
+      <label>账单开始日期
+        <input type="date" id="statementStart">
+      </label>
+      <label>账单结束日期
+        <input type="date" id="statementEnd">
+      </label>
+      <label>期初余额
+        <input type="number" step="0.01" id="openingBalance">
+      </label>
+      <label>期末余额
+        <input type="number" step="0.01" id="closingBalance">
+      </label>
+    </div>
+  </section>
+
+  <section class="card hidden" id="txSection">
+    <h2>③ 核对/修正交易记录</h2>
+    <p class="hint">金额：收入/存入为正数，支出/取出为负数（负号）。请逐行核对，可直接编辑或增删。</p>
+    <div class="table-wrap">
+      <table id="txTable">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>描述</th>
+            <th>金额</th>
+            <th>余额（参考）</th>
+            <th>参考号</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="txBody"></tbody>
+      </table>
+    </div>
+    <div class="table-actions">
+      <button id="addRowBtn" type="button">+ 添加一行</button>
+      <span id="txSummary" class="status"></span>
+    </div>
+  </section>
+
+  <section class="card hidden" id="generateSection">
+    <h2>④ 生成 QFX</h2>
+    <button id="generateBtn">生成并下载 QFX</button>
+    <span id="generateStatus" class="status"></span>
+  </section>
+</div>
+
+<!-- PDF.js 经典（非 ES module）构建，从本地 vendor 目录加载，双击打开(file://)也能正常工作 -->
+<script src="./vendor/pdfjs/pdf.min.js"></script>
+<!-- tesseract.js：纯 JS + WASM 的 OCR 引擎，只在遇到没有文字层的扫描件 PDF 时才会
+     实际用到（见下方"1d. OCR 扫描件解析"），用于兜底识别扫描件里的文字。 -->
+<script src="./vendor/tesseract/tesseract.min.js"></script>
+<script>
+"use strict";
+
+/* =========================================================================
+ * 0. 加载 PDF.js（本地 vendor 目录，离线可用）
+ * ========================================================================= */
+let pdfjsLib = null;
+try {
+  pdfjsLib = window["pdfjs-dist/build/pdf"];
+  if (!pdfjsLib) throw new Error("未找到 pdfjsLib 全局对象");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdfjs/pdf.worker.min.js";
+} catch (e) {
+  document.getElementById("parseStatus").textContent =
+    "PDF 引擎加载失败：请确认 index.html 与 vendor/pdfjs 文件夹在同一目录下一起使用。(" + e.message + ")";
+  document.getElementById("parseStatus").className = "status error";
+}
+
+// 扫描件 PDF 的 OCR 兜底解析要用到全局的 Tesseract 对象（来自
+// vendor/tesseract/tesseract.min.js）；如果没加载成功，遇到扫描件时会
+// 明确提示用户，而不是静默什么都不做。
+const ocrAvailable = typeof window.Tesseract !== "undefined";
+
+/* =========================================================================
+ * 1. 解析逻辑（对应 Python 版 app/parser.py，移植为浏览器端 JS）
+ * ========================================================================= */
+
+const DATE_KEYWORDS = ["交易日期", "记账日期", "交易时间", "记账时间", "日期", "trans date", "transaction date", "posting date", "date"];
+const DESC_KEYWORDS = ["摘要说明", "交易摘要", "交易说明", "交易描述", "摘要", "备注", "说明", "对方户名", "交易对方", "description", "detail", "memo", "narrative", "particulars"];
+const DEBIT_KEYWORDS = ["支出金额", "借方金额", "支出", "借方", "出账金额", "付款金额", "debit", "withdrawal"];
+const CREDIT_KEYWORDS = ["收入金额", "贷方金额", "收入", "贷方", "入账金额", "存入金额", "credit", "deposit"];
+const AMOUNT_KEYWORDS = ["交易金额", "发生额", "金额", "amount"];
+const BALANCE_KEYWORDS = ["账户余额", "余额", "结余", "balance"];
+const TYPE_KEYWORDS = ["收支类型", "收支", "交易类型", "类型", "type"];
+const REF_KEYWORDS = ["流水号", "交易单号", "凭证号", "单号", "交易流水号", "reference", "ref no", "ref.no"];
+
+const INCOME_MARKS = ["收入", "贷", "存入", "credit", "in"];
+const EXPENSE_MARKS = ["支出", "借", "取出", "debit", "out"];
+
+const CC_HINTS = [
+  "信用卡账单", "信用卡对账单", "信用卡明细", "信用卡账户", "信用卡交易明细",
+  "贷记卡对账单", "貸記卡對賬單", "credit card statement", "credit card account",
+];
+
+function norm(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function matchKeyword(cell, keywords) {
+  const c = norm(cell);
+  if (!c) return false;
+  return keywords.some((k) => c.includes(norm(k)));
+}
+
+const NUM_RE = /^[\d.]+$/;
+
+function parseNumber(s) {
+  if (s === null || s === undefined) return null;
+  s = String(s).trim();
+  if (!s || s === "-" || s === "--" || s === "—") return null;
+  let neg = false;
+  if (s.startsWith("(") && s.endsWith(")")) {
+    s = s.slice(1, -1);
+    neg = true;
+  }
+  s = s.replace(/,/g, "").replace(/[¥￥$]/g, "").trim();
+  s = s.replace(/\+/g, "");
+  if (s.endsWith("-")) { neg = true; s = s.slice(0, -1); }
+  if (s.startsWith("-")) { neg = true; s = s.slice(1); }
+  if (!NUM_RE.test(s)) {
+    const cleaned = s.replace(/[^\d.]/g, "");
+    if (!cleaned) return null;
+    s = cleaned;
+  }
+  const val = parseFloat(s);
+  if (Number.isNaN(val)) return null;
+  return neg ? -val : val;
+}
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+function toIso(y, mo, d) {
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${pad2(mo)}-${pad2(d)}`;
+}
+
+const CN_DATE_RE = /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/;
+const YMD_RE = /(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/;
+const YMD_COMPACT_RE = /^(\d{4})(\d{2})(\d{2})$/;
+const MDY_RE = /(\d{1,2})[-/](\d{1,2})[-/](\d{4})/;
+
+const MONTH_NAMES = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+  may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9,
+  september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+};
+
+function monthNameToNum(name) {
+  const key = String(name).toLowerCase().replace(/\.$/, "");
+  return MONTH_NAMES[key] || null;
+}
+
+// 英文全称日期，如 "August 01, 2026"、"Aug 1 2026"
+const ENGLISH_FULL_DATE_RE = /([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(\d{4})/;
+
+function parseDate(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  if (!s) return null;
+
+  let m = CN_DATE_RE.exec(s);
+  if (m) {
+    const r = toIso(+m[1], +m[2], +m[3]);
+    if (r) return r;
+  }
+  m = YMD_RE.exec(s);
+  if (m) {
+    const r = toIso(+m[1], +m[2], +m[3]);
+    if (r) return r;
+  }
+  m = YMD_COMPACT_RE.exec(s);
+  if (m) {
+    const r = toIso(+m[1], +m[2], +m[3]);
+    if (r) return r;
+  }
+  m = ENGLISH_FULL_DATE_RE.exec(s);
+  if (m) {
+    const mo = monthNameToNum(m[1]);
+    if (mo) {
+      const r = toIso(+m[3], mo, +m[2]);
+      if (r) return r;
+    }
+  }
+  m = MDY_RE.exec(s);
+  if (m) {
+    const a = +m[1], b = +m[2], y = +m[3];
+    let r = toIso(y, a, b);
+    if (r) return r;
+    r = toIso(y, b, a);
+    if (r) return r;
+  }
+  // 最后尝试交给浏览器 Date 解析（fuzzy，可能对纯英文日期有效）
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+  return null;
+}
+
+function identifyHeader(row) {
+  const mapping = {};
+  let hits = 0;
+  for (let idx = 0; idx < row.length; idx++) {
+    const cell = row[idx];
+    if (cell === null || cell === undefined) continue;
+    if (!("date" in mapping) && matchKeyword(cell, DATE_KEYWORDS)) { mapping.date = idx; hits++; continue; }
+    if (!("desc" in mapping) && matchKeyword(cell, DESC_KEYWORDS)) { mapping.desc = idx; hits++; continue; }
+    if (!("debit" in mapping) && matchKeyword(cell, DEBIT_KEYWORDS)) { mapping.debit = idx; hits++; continue; }
+    if (!("credit" in mapping) && matchKeyword(cell, CREDIT_KEYWORDS)) { mapping.credit = idx; hits++; continue; }
+    if (!("amount" in mapping) && matchKeyword(cell, AMOUNT_KEYWORDS)) { mapping.amount = idx; hits++; continue; }
+    if (!("balance" in mapping) && matchKeyword(cell, BALANCE_KEYWORDS)) { mapping.balance = idx; hits++; continue; }
+    if (!("type" in mapping) && matchKeyword(cell, TYPE_KEYWORDS)) { mapping.type = idx; hits++; continue; }
+    if (!("ref" in mapping) && matchKeyword(cell, REF_KEYWORDS)) { mapping.ref = idx; hits++; continue; }
+  }
+  const hasDate = "date" in mapping;
+  const hasValue = ("amount" in mapping) || ("debit" in mapping) || ("credit" in mapping);
+  if (hasDate && hasValue && hits >= 2) return mapping;
+  return null;
+}
+
+function rowToTransaction(row, mapping, source) {
+  const cell = (key) => {
+    const idx = mapping[key];
+    if (idx === undefined || idx >= row.length) return null;
+    return row[idx];
+  };
+  const dateRaw = cell("date") || "";
+  const dateIso = parseDate(dateRaw);
+  let desc = (cell("desc") || "").replace(/\n/g, " ").trim();
+
+  let amount = null;
+  const debitVal = parseNumber(cell("debit"));
+  const creditVal = parseNumber(cell("credit"));
+  const amountVal = parseNumber(cell("amount"));
+  const typeVal = norm(cell("type"));
+
+  if (debitVal !== null || creditVal !== null) {
+    const c = creditVal || 0.0;
+    const d = debitVal || 0.0;
+    amount = c - Math.abs(d);
+  } else if (amountVal !== null) {
+    amount = amountVal;
+    if (typeVal) {
+      if (EXPENSE_MARKS.some((m) => typeVal.includes(m)) && amount > 0) amount = -amount;
+      else if (INCOME_MARKS.some((m) => typeVal.includes(m)) && amount < 0) amount = Math.abs(amount);
+    }
+  }
+
+  const balance = parseNumber(cell("balance"));
+  const ref = (cell("ref") || "").trim() || null;
+
+  if (!dateIso && !desc && amount === null) return null;
+
+  return {
+    date_raw: dateRaw,
+    date_iso: dateIso,
+    description: desc || "(无描述)",
+    amount,
+    balance,
+    ref,
+    source,
+  };
+}
+
+const ACCOUNT_NO_PATTERNS = [
+  /账\s*号[:：]\s*([\dXx*]{4}(?:[\s-]?[\dXx*]{2,6}){1,6})/,
+  /卡\s*号[:：]\s*([\dXx*]{4}(?:[\s-]?[\dXx*]{2,6}){1,6})/,
+  /Account\s*(?:No\.?|Number)[:：]?\s*([\dXx*]{4}(?:[\s-]?[\dXx*]{2,6}){1,6})/i,
+  // 部分信用社账单把账号写在"...SUMMARY | 254521193"这种用竖线分隔的标题行里
+  /SUMMARY\s*\|\s*(\d{5,20})\b/i,
+];
+const HOLDER_PATTERNS = [
+  /户\s*名[:：]\s*([^\s，,。\n]{2,20})/,
+  /客户名称[:：]\s*([^\s，,。\n]{2,20})/,
+  /Account\s*Holder[:：]?\s*([A-Za-z ,.'-]{2,40})/i,
+];
+const BANK_PATTERNS = [/([\u4e00-\u9fa5]{2,10}银行)/];
+// 常见英文银行/信用社名称（按长度从长到短匹配，优先命中更具体的全称）
+const KNOWN_EN_BANK_NAMES = [
+  "JPMorgan Chase Bank, N.A.", "JPMorgan Chase Bank", "Chase Bank", "Chase",
+  "Bank of America, N.A.", "Bank of America",
+  "Wells Fargo Bank, N.A.", "Wells Fargo",
+  "Citibank, N.A.", "Citibank",
+  "U.S. Bank", "US Bank",
+  "Capital One", "PNC Bank", "TD Bank", "Truist Bank", "Regions Bank",
+  "Randolph-Brooks Federal Credit Union", "RBFCU",
+].sort((a, b) => b.length - a.length);
+const PERIOD_PATTERNS = [
+  /(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)\s*[-~至到]\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)/,
+  // 英文写法，如 "August 01, 2026 through August 31, 2026"（PDF 文本提取后 through 前后常常没有空格）
+  /([A-Za-z]{3,9}\.?\s+\d{1,2},?\s*\d{4})\s*(?:through|thru|to)\s*([A-Za-z]{3,9}\.?\s+\d{1,2},?\s*\d{4})/i,
+  // "06/22/2026 through 06/30/2026" 这种纯数字日期写法（常见于信用社账单）
+  /(\d{1,2}\/\d{1,2}\/\d{4})\s*(?:through|thru|to)\s*(\d{1,2}\/\d{1,2}\/\d{4})/i,
+];
+// 部分信用社账单把"上期余额/本期贷方合计/本期借方合计/本期余额"四个标签
+// 集中写在一起，再把对应的四个金额集中写在后面（标签和数值不是紧挨着的），
+// 例如："Previous Statement Balance Total Credits Total Debits Current
+// Statement Balance $0.00 $47,866.50 $1,486.06 $46,380.44"。用一个专门的
+// 正则一次性把四个金额按顺序取出来，比按标签就近匹配更可靠。
+const SUMMARY_4VALUE_RE =
+  /Previous\s*Statement\s*Balance[\s\S]{0,120}?Total\s*Credits[\s\S]{0,120}?Total\s*Debits[\s\S]{0,120}?Current\s*Statement\s*Balance[\s|]*\$?([\d,]+\.\d{2})[\s|]*\$?([\d,]+\.\d{2})[\s|]*\$?([\d,]+\.\d{2})[\s|]*\$?([\d,]+\.\d{2})/i;
+const OPEN_BAL_PATTERNS = [
+  /期初余额[:：]?\s*([\d,]+\.?\d*)/,
+  /上期余额[:：]?\s*([\d,]+\.?\d*)/,
+  /Opening\s*Balance[:：]?\s*\$?([\d,]+\.?\d*)/i,
+  /Beginning\s*Balance[:：]?\s*(?:\d+\s+)?\$?([\d,]+\.?\d*)/i,
+  // Bank of America 等写法："Beginning balance on February 1, 2026 $203,079.96"
+  // 余额金额前面夹了一段日期文字，用排除 "$" 和换行的字符类跳过它。
+  /Beginning\s*balance\b[^$\n]*\$\s*([\d,]+\.\d{2})/i,
+];
+const CLOSE_BAL_PATTERNS = [
+  /期末余额[:：]?\s*([\d,]+\.?\d*)/,
+  /本期余额[:：]?\s*([\d,]+\.?\d*)/,
+  /Closing\s*Balance[:：]?\s*\$?([\d,]+\.?\d*)/i,
+  /Ending\s*Balance[:：]?\s*(?:\d+\s+)?\$?([\d,]+\.?\d*)/i,
+  // 同上，兼容 "Ending balance on February 28, 2026 $234,996.54" 这种写法。
+  /Ending\s*balance\b[^$\n]*\$\s*([\d,]+\.\d{2})/i,
+];
+
+function extractAccountInfo(fullText) {
+  const info = {
+    bank_name: "", holder_name: "", account_number: "", bank_id: "",
+    currency: "CNY", account_type_guess: "BANK",
+    statement_start: null, statement_end: null,
+    opening_balance: null, closing_balance: null,
+  };
+
+  for (const pat of ACCOUNT_NO_PATTERNS) {
+    const m = pat.exec(fullText);
+    if (m) { info.account_number = m[1].replace(/[\s-]/g, ""); break; }
+  }
+  for (const pat of HOLDER_PATTERNS) {
+    const m = pat.exec(fullText);
+    if (m) { info.holder_name = m[1].trim(); break; }
+  }
+  for (const pat of BANK_PATTERNS) {
+    const m = pat.exec(fullText);
+    if (m) { info.bank_name = m[1]; break; }
+  }
+  if (!info.bank_name) {
+    for (const name of KNOWN_EN_BANK_NAMES) {
+      if (fullText.includes(name)) { info.bank_name = name; break; }
+    }
+  }
+  for (const pat of PERIOD_PATTERNS) {
+    const m = pat.exec(fullText);
+    if (m) { info.statement_start = parseDate(m[1]); info.statement_end = parseDate(m[2]); break; }
+  }
+  for (const pat of OPEN_BAL_PATTERNS) {
+    const m = pat.exec(fullText);
+    if (m) { info.opening_balance = parseNumber(m[1]); break; }
+  }
+  // 期末余额取"最后一次"匹配而不是第一次：如果一份 PDF 实际上是把好几个月
+  // 的对账单前后拼接在一起（每个月都各自打印一次"Ending balance"），第
+  // 一次出现的其实是第一个月的期末余额，真正代表"整份文件最终余额"的是
+  // 最后一次出现的那个数字。
+  for (const pat of CLOSE_BAL_PATTERNS) {
+    const matches = [...fullText.matchAll(new RegExp(pat.source, pat.flags.includes("g") ? pat.flags : pat.flags + "g"))];
+    if (matches.length) { info.closing_balance = parseNumber(matches[matches.length - 1][1]); break; }
+  }
+  if (info.opening_balance === null || info.closing_balance === null) {
+    const sm = SUMMARY_4VALUE_RE.exec(fullText);
+    if (sm) {
+      if (info.opening_balance === null) info.opening_balance = parseNumber(sm[1]);
+      if (info.closing_balance === null) info.closing_balance = parseNumber(sm[4]);
+    }
+  }
+
+  const upper = fullText.toUpperCase();
+  const hasRmbSymbol = fullText.includes("¥") || fullText.includes("￥") || fullText.includes("人民币") || upper.includes("RMB");
+  const hasUsdHint = fullText.includes("$") || upper.includes("USD");
+  // 银行名称精确匹配到我们认识的美国银行/信用社，是比"¥"/"$"符号更可靠的
+  // 信号：像扫描件 OCR 这种噪声很大的文本，偶尔会把某个笔画误认成"¥"，
+  // 如果只看符号很容易被这种误判带偏，所以银行名匹配优先。
+  const isKnownUsBank = KNOWN_EN_BANK_NAMES.includes(info.bank_name);
+  if (isKnownUsBank) info.currency = "USD";
+  else if (hasRmbSymbol && !hasUsdHint) info.currency = "CNY";
+  else if (hasUsdHint && !hasRmbSymbol) info.currency = "USD";
+  else if (hasUsdHint) info.currency = hasRmbSymbol ? "CNY" : "USD";
+  else info.currency = "CNY";
+
+  const low = fullText.toLowerCase();
+  if (CC_HINTS.some((h) => low.includes(h.toLowerCase()))) info.account_type_guess = "CC";
+
+  return info;
+}
+
+const LINE_TX_RE = /(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日)[\s\S]{0,80}?(-?[\d,]+\.\d{2})/;
+
+function parseLinesFallback(text) {
+  const txs = [];
+  for (let line of text.split("\n")) {
+    line = line.trim();
+    if (!line) continue;
+    const m = LINE_TX_RE.exec(line);
+    if (!m) continue;
+    const dateRaw = m[1];
+    const amount = parseNumber(m[2]);
+    let desc = line.replace(m[1], "").replace(m[2], "").trim();
+    desc = desc.replace(/\s{2,}/g, " ");
+    txs.push({
+      date_raw: dateRaw,
+      date_iso: parseDate(dateRaw),
+      description: desc.slice(0, 120) || "(无描述)",
+      amount,
+      balance: null,
+      ref: null,
+      source: "text-fallback",
+    });
+  }
+  return txs;
+}
+
+/* -------------------------------------------------------------------------
+ * 1c. “分节叙述式”对账单解析（常见于美国银行，如 Chase / Bank of America）
+ *
+ * 这类 PDF 不是规整的网格表格，而是按“DEPOSITS AND ADDITIONS / CHECKS PAID /
+ * ELECTRONIC WITHDRAWALS / FEES”等小节组织的纯文本列表：每笔交易第一行以
+ * 「MM/DD 日期」开头、以金额结尾，后面可能跟着若干行没有日期/金额的
+ * 换行续行（附言、备注等）。用小节标题判断收入/支出符号，用“日期在行首
+ * 附近 + 金额在行尾”识别每笔交易的起始行，其余行归并为描述的延续。
+ * ------------------------------------------------------------------------- */
+
+// 小节标题 -> 该小节内交易金额的符号（+1 收入 / -1 支出）。
+// 需要与整行（去除首尾空白、大写、合并连续空格、去掉末尾的"(CONTINUED)"）完全一致才算命中，
+// 避免把普通描述文字里偶然出现的相同词语误判为小节标题。
+const SECTION_SIGN = {
+  "DEPOSITS AND ADDITIONS": 1,
+  "DEPOSITS AND OTHER CREDITS": 1,
+  "DEPOSITS AND OTHER ADDITIONS": 1,
+  "ELECTRONIC DEPOSITS": 1,
+  "CREDITS": 1,
+  "OTHER CREDITS": 1,
+  "CHECKS PAID": -1,
+  "CHECKS": -1,
+  "ELECTRONIC WITHDRAWALS": -1,
+  "WITHDRAWALS AND OTHER DEBITS": -1,
+  "OTHER WITHDRAWALS": -1,
+  "ATM & DEBIT CARD WITHDRAWALS": -1,
+  "ATM AND DEBIT CARD WITHDRAWALS": -1,
+  "CARD WITHDRAWALS": -1,
+  "DEBIT CARD WITHDRAWALS": -1,
+  "FEES": -1,
+  "SERVICE FEES": -1,
+  "OTHER FEES": -1,
+  "WITHDRAWALS": -1,
+};
+// 遇到这些小节标题（或 *start*/*end* 标记）就退出当前的交易小节，
+// 避免把余额表/支票影像列表等非交易内容误当成交易。
+const SECTION_STOP = [
+  "DAILY ENDING BALANCE", "IMAGES", "CHECKING SUMMARY", "ACCOUNT SUMMARY",
+  "SAVINGS SUMMARY", "SERVICE CHARGE SUMMARY", "OVERDRAFT PROTECTION",
+  "MONTHLY SERVICE FEE",
+];
+
+function normHeaderLine(line) {
+  return line
+    .trim()
+    .toUpperCase()
+    .replace(/\s*[-–—]?\s*\(?CONTINUED\)?\s*$/, "") // 去掉 "(CONTINUED)" / "- CONTINUED" 等续页标记
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const LINE_DATE_RE = /\b(\d{1,2})\/(\d{1,2})\b/;
+const LINE_TRAILING_AMOUNT_RE = /([+-]?\$?[\d,]+\.\d{2})\s*$/;
+// 有些银行（如 Bank of America）为了省地方，把支票列表排成两栏，一行里塞了
+// 两笔"日期 支票号 金额"（顺序可能是 日期→支票号→金额，也可能是 支票号→
+// 日期→金额，如 Chase 的单栏格式），用 matchAll 一次性把一行里出现的所有
+// 笔数都取出来，而不是像普通交易行那样只取“行首日期 + 行尾金额”一组。
+const CHECK_ROW_RE =
+  /(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+(\d{3,7})\*?\s+(-?\$?[\d,]+\.\d{2})|(\d{3,7})\s*[*^]*\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+(-?\$?[\d,]+\.\d{2})/g;
+
+// 大多数美国银行对账单里每笔交易只写“MM/DD”不带年份，需要结合账单周期
+// （账户信息里识别出的起止日期）推断出正确的年份。
+function inferYear(month, account) {
+  const sy = account.statement_start ? +account.statement_start.slice(0, 4) : null;
+  const sm = account.statement_start ? +account.statement_start.slice(5, 7) : null;
+  const ey = account.statement_end ? +account.statement_end.slice(0, 4) : null;
+  const em = account.statement_end ? +account.statement_end.slice(5, 7) : null;
+  if (sm !== null && month === sm) return sy;
+  if (em !== null && month === em) return ey;
+  if (sy !== null && ey !== null) return sy === ey ? sy : (month >= (sm || 1) ? sy : ey);
+  if (sy !== null) return sy;
+  if (ey !== null) return ey;
+  return new Date().getFullYear();
+}
+
+function parseSectionedStatement(fullText, account) {
+  const lines = fullText.split("\n");
+  const txs = [];
+  let sign = null;
+  let sectionName = null;
+  let cur = null;
+
+  const flush = () => {
+    if (cur) {
+      let desc = cur.descParts.join(" ").replace(/\s{2,}/g, " ").trim();
+      // 常见 ACH 元数据里对方姓名/公司名的字段，不同银行写法不同：Chase 用
+      // "Ind Name:"，Bank of America 用 "INDN:"，尽量提取出来做更干净的描述。
+      const indNameMatch = desc.match(/(?:Ind\s*Name|INDN)\s*:?\s*([^]+?)(?:\s+CO\b|\s+ID:|\s+Trn:|$)/i);
+      const checkNoMatch = desc.match(/^(\d{3,7})\b/);
+      if (indNameMatch && indNameMatch[1].trim()) {
+        desc = indNameMatch[1].trim();
+      } else if (cur.isCheck && checkNoMatch) {
+        desc = `Check #${checkNoMatch[1]}`;
+      }
+      if (!desc) desc = cur.isCheck ? "Check" : "Transaction";
+      txs.push({
+        date_raw: cur.dateRaw,
+        date_iso: cur.dateIso,
+        description: desc.slice(0, 200),
+        amount: cur.sign * Math.abs(cur.amount),
+        balance: null,
+        ref: null,
+        source: "sectioned",
+      });
+    }
+    cur = null;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const norm = normHeaderLine(line);
+
+    if (Object.prototype.hasOwnProperty.call(SECTION_SIGN, norm)) {
+      flush();
+      sign = SECTION_SIGN[norm];
+      sectionName = norm;
+      continue;
+    }
+    // 安全网：除了精确匹配的标题列表外，任何看起来像“余额表/汇总/影像”类
+    // 的标题行（不同银行措辞差异很大，如 "Daily ledger balances"、"DAILY
+    // ENDING BALANCE"、"Checking Summary" 等）都强制结束当前小节，避免把
+    // 这些非交易的数字表格误吞进上一个小节（这类表格里全是"日期+金额"，
+    // 一旦被当成交易会产生离谱的错误汇总）。
+    const looksLikeStopHeader =
+      SECTION_STOP.includes(norm) ||
+      (norm.length < 60 && /BALANC|SUMMARY|\bIMAGES?\b/.test(norm) && !/\d/.test(norm));
+    // 有些 PDF 里存在与可见文字重叠的隐藏标记文字（如无障碍标签"*end*checks
+    // paid section*"），个别 PDF 引擎按字符坐标重新排序时会把这段隐藏标记
+    // 和紧挨着的真实交易行糅在一起。真正的标记行本身都很短，一旦一行长度
+    // 明显超过正常标记的长度，很可能是被污染过的真实交易行，不能直接当
+    // 标记跳过，要让它继续走正常的日期/金额识别逻辑。
+    const isMarkerLine = (/^\*end\*/i.test(line) || /^\*start\*/i.test(line)) && line.length <= 40;
+    if (looksLikeStopHeader || isMarkerLine) {
+      flush();
+      sign = null;
+      sectionName = null;
+      continue;
+    }
+    if (sign === null) continue; // 不在已识别的交易小节内，忽略
+
+    if (/^total\b/i.test(line)) {
+      flush();
+      sign = null;
+      sectionName = null;
+      continue;
+    }
+
+    // "支票"小节常见的两栏并排格式：一行里有两笔支票记录，需要用专门的
+    // 正则一次性取出这一行里所有的（日期, 支票号, 金额）组合。
+    if (sectionName === "CHECKS" || sectionName === "CHECKS PAID") {
+      const checkRowMatches = [...line.matchAll(CHECK_ROW_RE)];
+      if (checkRowMatches.length >= 1) {
+        flush();
+        for (const cm of checkRowMatches) {
+          const dateStr = cm[1] !== undefined ? cm[1] : cm[5];
+          const checkNo = cm[1] !== undefined ? cm[2] : cm[4];
+          const amountStr = cm[1] !== undefined ? cm[3] : cm[6];
+          const dm = LINE_DATE_RE.exec(dateStr);
+          if (!dm) continue;
+          const mm = +dm[1], dd = +dm[2];
+          const year = inferYear(mm, account);
+          const dateIso = year ? toIso(year, mm, dd) : null;
+          const amt = parseNumber(amountStr) || 0;
+          txs.push({
+            date_raw: dateStr,
+            date_iso: dateIso,
+            description: `Check #${checkNo}`,
+            amount: sign * Math.abs(amt),
+            balance: null,
+            ref: null,
+            source: "sectioned",
+          });
+        }
+        continue;
+      }
+    }
+
+    const dateMatch = LINE_DATE_RE.exec(line);
+    const amountMatch = LINE_TRAILING_AMOUNT_RE.exec(line);
+
+    if (dateMatch && amountMatch && dateMatch.index < 20 && dateMatch.index < amountMatch.index) {
+      flush();
+      const mm = +dateMatch[1], dd = +dateMatch[2];
+      const year = inferYear(mm, account);
+      const dateIso = year ? toIso(year, mm, dd) : null;
+      let rest = line.slice(0, amountMatch.index) + line.slice(amountMatch.index + amountMatch[0].length);
+      rest = rest.replace(dateMatch[0], " ").trim();
+      cur = {
+        dateRaw: dateMatch[0],
+        dateIso,
+        amount: parseNumber(amountMatch[1]) || 0,
+        sign,
+        descParts: [rest],
+        isCheck: sectionName === "CHECKS PAID" || sectionName === "CHECKS",
+      };
+    } else if (cur) {
+      cur.descParts.push(line);
+    }
+    // 既不是新交易起始行、又没有正在处理的交易时，说明是小节内的列头/说明文字，忽略即可。
+  }
+  flush();
+  return txs;
+}
+
+/* -------------------------------------------------------------------------
+ * 1c. 双栏“左右并排”式对账单解析（如部分信用社账单：一页里把交易列表排成
+ *     左右两栏，表头写作 "Date Description Amount Date Description Amount"，
+ *     支票列表写作 "Check Amount Date Check Amount Date"）。
+ *
+ *     这类 PDF 按 y 坐标分行会把同一视觉行里的左右两笔交易错误拼接，所以
+ *     改用 PDF.js 原始抽取顺序的"平铺全文"（flatText，见 extractPageLines），
+ *     其顺序天然是"一条完整交易的全部文字，紧跟着下一条完整交易的全部文
+ *     字"，可以直接用"日期 → 描述 → 金额"的状态机识别，不需要关心左右栏。
+ *
+ *     好消息是这类对账单里金额本身通常已经带好正负号（存入为正/无符号，
+ *     支出为 "-$xx.xx"），不需要再按小节名称推断收支方向。
+ * ------------------------------------------------------------------------- */
+
+const TWO_COL_TX_HEADER_RE = /Date\s*Description\s*Amount\s*Date\s*Description\s*Amount/gi;
+const TWO_COL_CHECK_HEADER_RE = /Check\s*Amount\s*Date\s*Check\s*Amount\s*Date/gi;
+const TWO_COL_SECTION_STOP_RE = /rbfcu\.org|\bNote:|\bOther Information\b|\bPAGE\s*\d+\s*of\s*\d+/i;
+const TWO_COL_TX_ENTRY_RE = /(\d{1,2}\/\d{1,2})\s+([\s\S]*?)\s*(-?\$[\d,]+\.\d{2})(?=\s|$)/g;
+const TWO_COL_CHECK_ENTRY_RE = /\b(\d{3,7})\s+(-?\$[\d,]+\.\d{2})\s+(\d{1,2}\/\d{1,2})\b/g;
+
+function looksLikeTwoColumnStatement(flatText) {
+  return TWO_COL_TX_HEADER_RE.test(flatText) || TWO_COL_CHECK_HEADER_RE.test(flatText);
+}
+
+function findTwoColHeaderPositions(flatText) {
+  const positions = [];
+  let m;
+  TWO_COL_TX_HEADER_RE.lastIndex = 0;
+  while ((m = TWO_COL_TX_HEADER_RE.exec(flatText))) {
+    positions.push({ type: "tx", start: m.index, end: m.index + m[0].length });
+  }
+  TWO_COL_CHECK_HEADER_RE.lastIndex = 0;
+  while ((m = TWO_COL_CHECK_HEADER_RE.exec(flatText))) {
+    positions.push({ type: "check", start: m.index, end: m.index + m[0].length });
+  }
+  positions.sort((a, b) => a.start - b.start);
+  return positions;
+}
+
+function parseTwoColumnStatement(flatText, account) {
+  const txs = [];
+  const headers = findTwoColHeaderPositions(flatText);
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i];
+    let segEnd = i + 1 < headers.length ? headers[i + 1].start : flatText.length;
+    const stopMatch = TWO_COL_SECTION_STOP_RE.exec(flatText.slice(h.end, segEnd));
+    if (stopMatch) segEnd = h.end + stopMatch.index;
+    const segment = flatText.slice(h.end, segEnd);
+
+    if (h.type === "check") {
+      TWO_COL_CHECK_ENTRY_RE.lastIndex = 0;
+      let m;
+      while ((m = TWO_COL_CHECK_ENTRY_RE.exec(segment))) {
+        const checkNo = m[1];
+        const amount = parseNumber(m[2]);
+        const dateRaw = m[3];
+        const dm = LINE_DATE_RE.exec(dateRaw);
+        if (!dm || amount === null) continue;
+        const mm = +dm[1], dd = +dm[2];
+        const year = inferYear(mm, account);
+        txs.push({
+          date_raw: dateRaw,
+          date_iso: year ? toIso(year, mm, dd) : null,
+          description: `Check #${checkNo}`,
+          amount,
+          balance: null,
+          ref: null,
+          source: "two_col",
+        });
+      }
+    } else {
+      TWO_COL_TX_ENTRY_RE.lastIndex = 0;
+      let m;
+      while ((m = TWO_COL_TX_ENTRY_RE.exec(segment))) {
+        const dateRaw = m[1];
+        let desc = m[2].replace(/\s{2,}/g, " ").trim();
+        const amount = parseNumber(m[3]);
+        const dm = LINE_DATE_RE.exec(dateRaw);
+        if (!dm || amount === null) continue;
+        const mm = +dm[1], dd = +dm[2];
+        const year = inferYear(mm, account);
+        if (!desc) desc = "Transaction";
+        txs.push({
+          date_raw: dateRaw,
+          date_iso: year ? toIso(year, mm, dd) : null,
+          description: desc.slice(0, 200),
+          amount,
+          balance: null,
+          ref: null,
+          source: "two_col",
+        });
+      }
+    }
+  }
+  return txs;
+}
+
+/* -------------------------------------------------------------------------
+ * 1b. 从 PDF.js 的文本位置信息重建“表格行/列”（浏览器端没有 pdfplumber 的
+ *     表格检测，这里用坐标聚类近似还原表格结构）
+ * ------------------------------------------------------------------------- */
+
+async function extractPageLines(page) {
+  const content = await page.getTextContent();
+  const items = content.items.filter((it) => it.str !== undefined);
+
+  // 按 y 坐标分组成“行”（PDF 坐标系原点在左下角，y 越大越靠页面上方）
+  const lineTolerance = 2.2;
+  const lines = [];
+  for (const it of items) {
+    if (!it.str.trim() && it.str !== " ") continue;
+    const y = it.transform[5];
+    const x = it.transform[4];
+    let line = lines.find((l) => Math.abs(l.y - y) <= lineTolerance);
+    if (!line) {
+      line = { y, items: [] };
+      lines.push(line);
+    }
+    line.items.push({ x, str: it.str, width: it.width || 0 });
+  }
+  lines.sort((a, b) => b.y - a.y); // 从上到下
+  for (const l of lines) l.items.sort((a, b) => a.x - b.x);
+
+  // 全文（保留自然阅读顺序，供正则提取账户信息 / 兜底解析使用）
+  const fullText = lines.map((l) => l.items.map((it) => it.str).join("")).join("\n");
+  // 原始顺序全文（不按 y 坐标分行，只是把这一页所有文字项按 PDF.js 给出的
+  // 抽取顺序原样拼接、用空格隔开）。某些信用社/银行对账单会把交易列表排成
+  // “左右两栏”，同一视觉行里混杂着两笔不同交易的内容，按 y 坐标分行反而
+  // 会把它们错误地拼在一起；但 PDF.js 的抽取顺序通常是先给完左栏某一条目
+  // 的全部文字、再给右栏对应条目的全部文字，天然保持了“一条完整交易紧跟
+  // 着下一条完整交易”的顺序，更适合用状态机去识别“日期…描述…金额”。
+  const flatText = items.map((it) => it.str).join(" ").replace(/\s+/g, " ");
+
+  return { lines, fullText, flatText };
+}
+
+// 把一行的 items 按较大的 x 间隔聚类为“单元格”，同时记录每个单元格起始 x 坐标。
+// 注意：pdf.js 在两段文字之间有明显空白时，常会合成一个 str===" " 的
+// “空白 item”，其 width 就等于这段空白的实际宽度——这才是真正需要判断的
+// “列间距”，不能只看相邻 item 之间 x 坐标的差值（那通常几乎为 0，因为
+// 空白本身已经作为一个 item 占满了间隔）。
+const GAP_THRESHOLD = 10; // pt，经验值：同一单元格内的字符间隔一般明显小于此值
+
+function buildCellsWithPos(items) {
+  const cells = [];
+  let cur = "";
+  let curX = null;
+  let lastEnd = null;
+  for (const it of items) {
+    const isSpaceOnly = it.str.trim() === "";
+    const gap = lastEnd === null ? 0 : it.x - lastEnd;
+    const effectiveGap = isSpaceOnly ? Math.max(gap, it.width) : gap;
+    if (lastEnd !== null && effectiveGap > GAP_THRESHOLD) {
+      if (cur.trim()) cells.push({ text: cur.trim(), x: curX });
+      cur = isSpaceOnly ? "" : it.str;
+      curX = isSpaceOnly ? null : it.x;
+    } else if (isSpaceOnly) {
+      cur += " ";
+    } else {
+      if (lastEnd !== null && gap > 1.5) cur += " ";
+      cur += it.str;
+      if (curX === null) curX = it.x;
+    }
+    lastEnd = it.x + it.width;
+  }
+  if (cur.trim()) cells.push({ text: cur.trim(), x: curX });
+  return cells;
+}
+
+// 用表头各单元格的起始 x 坐标作为“列锚点”，把同一页后续每一行的单元格
+// 按最近列归位，从而还原出与表头列数一致、位置对齐的表格行（即使某一行
+// 的借方/贷方等某一列没有内容，也会在对应位置留空，而不会整体错位）。
+function assignColumn(x, boundaries) {
+  for (let i = 0; i < boundaries.length; i++) {
+    if (x < boundaries[i]) return i;
+  }
+  return boundaries.length;
+}
+
+function reconstructTable(lines) {
+  for (let r = 0; r < Math.min(30, lines.length); r++) {
+    const headerCells = buildCellsWithPos(lines[r].items);
+    const headerTexts = headerCells.map((c) => c.text);
+    const mapping = identifyHeader(headerTexts);
+    if (!mapping) continue;
+
+    const xs = headerCells.map((c) => c.x).sort((a, b) => a - b);
+    const boundaries = [];
+    for (let i = 0; i < xs.length - 1; i++) boundaries.push((xs[i] + xs[i + 1]) / 2);
+    const numCols = headerCells.length;
+
+    const rows = [];
+    for (let i = r; i < lines.length; i++) {
+      const cells = buildCellsWithPos(lines[i].items);
+      const rowArr = new Array(numCols).fill("");
+      for (const c of cells) {
+        const idx = assignColumn(c.x, boundaries);
+        rowArr[idx] = rowArr[idx] ? rowArr[idx] + " " + c.text : c.text;
+      }
+      rows.push(rowArr);
+    }
+    return { mapping, rows }; // rows[0] 是表头本身
+  }
+  return null;
+}
+
+/* -------------------------------------------------------------------------
+ * 1d. OCR 扫描件解析（对应 Python 版 app/ocr.py，移植为浏览器端 JS）
+ *
+ * 整份 PDF 完全没有文字层（典型的扫描件/图片型 PDF）时，前面基于 PDF.js
+ * 文本坐标的表格重建/分节解析注定一无所获，改用 OCR 兜底：
+ *   1. 用 PDF.js 自己已经具备的渲染能力把每页画到一个 <canvas> 上（不需要
+ *      额外的图片渲染库）。
+ *   2. 用 tesseract.js（纯 JS + WASM，vendor/tesseract/ 目录下）识别这张
+ *      canvas 上的文字，拿到每个单词的像素坐标。
+ *   3. 按坐标把同一视觉行的单词聚类成"单元格"，参照表头单元格的位置把
+ *      后续每一行的单元格归位到对应列，还原出表格结构——逻辑与
+ *      reconstructTable() 针对 PDF.js 文本坐标做的事情完全一致，只是坐标
+ *      来源换成了 OCR 单词的像素坐标。
+ * 因为是 OCR，识别错误在所难免（尤其是扫描件本身有噪点、倾斜、水印时），
+ * 解析结果只作为"尽力而为"的猜测，务必提示用户仔细核对。
+ * ------------------------------------------------------------------------- */
+
+// 渲染 PDF 页面为图片时用的缩放比例：PDF.js 的 1.0 倍缩放对应 72 DPI，
+// 250/72 ≈ 3.47，与 Python 版 app/ocr.py 里 RENDER_DPI=250 保持一致
+// （太低文字太糊识别不出来，太高又会明显拖慢速度）。
+const OCR_RENDER_SCALE = 250 / 72;
+// 同一视觉行内，相邻两个单词之间的间隔（像素，按上面的渲染比例估算）
+// 超过这个值就认为是跨列了（另起一个单元格），而不是同一段文字里的空格。
+const OCR_CELL_GAP_PX = 32;
+
+let _ocrWorkerPromise = null;
+function getOcrWorker() {
+  if (!_ocrWorkerPromise) {
+    _ocrWorkerPromise = Tesseract.createWorker("eng", 1, {
+      corePath: "./vendor/tesseract/",
+      workerPath: "./vendor/tesseract/worker.min.js",
+      langPath: "./vendor/tesseract/",
+      gzip: false, // 本地打包的 eng.traineddata 没有压缩成 .gz
+    });
+  }
+  return _ocrWorkerPromise;
+}
+
+// 把 tesseract 返回的 TSV 文本解析成带坐标的单词列表，逻辑和
+// app/ocr_node/recognize.js 里对 Node 版 tesseract.js 输出的解析完全一致：
+// TSV 每行的列是 level, page_num, block_num, par_num, line_num, word_num,
+// left, top, width, height, conf, text；level===5 才是单词级别的行。
+function parseOcrTsv(tsv) {
+  const words = [];
+  for (const rawLine of (tsv || "").split("\n")) {
+    const cols = rawLine.split("\t");
+    if (cols.length < 12) continue;
+    const level = +cols[0];
+    if (level !== 5) continue;
+    const [, , blockNum, parNum, lineNum, wordNum, left, top, width, height, conf, ...rest] = cols;
+    const text = rest.join("\t");
+    if (!text || !text.trim()) continue;
+    words.push({
+      text,
+      block: +blockNum,
+      par: +parNum,
+      line: +lineNum,
+      word: +wordNum,
+      x0: +left,
+      y0: +top,
+      x1: +left + +width,
+      y1: +top + +height,
+      conf: +conf,
+    });
+  }
+  return words;
+}
+
+// 按 tesseract 给出的 block/par/line 分组，得到按阅读顺序排列的"行"列表。
+// 显式按 (block, par, line) 数值排序 key，不依赖 TSV 行本身的输出顺序。
+function groupOcrWordsIntoLines(words) {
+  const groups = new Map();
+  for (const w of words) {
+    const key = `${w.block}-${w.par}-${w.line}`;
+    if (!groups.has(key)) groups.set(key, { key: [w.block, w.par, w.line], items: [] });
+    groups.get(key).items.push(w);
+  }
+  const entries = Array.from(groups.values());
+  entries.sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2] - b.key[2]);
+  const lines = entries.map((e) => e.items.slice().sort((a, b) => a.x0 - b.x0));
+  return lines;
+}
+
+// 把一行里的单词按 x 间隔聚类成"单元格"，记录每个单元格的起始 x 坐标。
+function buildOcrCellsWithPos(lineWords) {
+  const cells = [];
+  let curParts = [];
+  let curX = null;
+  let lastEnd = null;
+  for (const w of lineWords) {
+    const gap = lastEnd === null ? 0 : w.x0 - lastEnd;
+    if (lastEnd !== null && gap > OCR_CELL_GAP_PX) {
+      if (curParts.length) cells.push({ text: curParts.join(" ").trim(), x: curX });
+      curParts = [w.text];
+      curX = w.x0;
+    } else {
+      curParts.push(w.text);
+      if (curX === null) curX = w.x0;
+    }
+    lastEnd = w.x1;
+  }
+  if (curParts.length) cells.push({ text: curParts.join(" ").trim(), x: curX });
+  return cells;
+}
+
+function reconstructTableFromOcr(lines) {
+  for (let r = 0; r < Math.min(30, lines.length); r++) {
+    const headerCells = buildOcrCellsWithPos(lines[r]);
+    const headerTexts = headerCells.map((c) => c.text);
+    const mapping = identifyHeader(headerTexts);
+    if (!mapping) continue;
+
+    const xs = headerCells.map((c) => c.x).sort((a, b) => a - b);
+    const boundaries = [];
+    for (let i = 0; i < xs.length - 1; i++) boundaries.push((xs[i] + xs[i + 1]) / 2);
+    const numCols = headerCells.length;
+
+    const rows = [];
+    for (let i = r; i < lines.length; i++) {
+      const cells = buildOcrCellsWithPos(lines[i]);
+      const rowArr = new Array(numCols).fill("");
+      for (const c of cells) {
+        let idx = assignColumn(c.x, boundaries);
+        if (idx >= numCols) idx = numCols - 1;
+        rowArr[idx] = rowArr[idx] ? `${rowArr[idx]} ${c.text}` : c.text;
+      }
+      rows.push(rowArr);
+    }
+    return { mapping, rows };
+  }
+  return null;
+}
+
+// 页面底部常见的"Totals / Fee period / Cash Deposited / Transactions /
+// Minimum daily balance"这类统计行，不是单笔交易，但因为同一页里没有另
+// 起一个表头，会被表格重建逻辑当成普通数据行、把汇总金额误当成交易金额
+// （这是导致总金额被严重放大的主要原因之一），需要单独识别并过滤掉。
+const OCR_SUMMARY_ROW_HINT_RE = new RegExp(
+  "^(total|totals|fee period|cash deposited|transactions?$|minimum daily balance|" +
+    "average (?:ledger|daily) balance|service charge|standard monthly service fee|" +
+    "monthly service fee)\\b",
+  "i"
+);
+function looksLikeOcrSummaryRow(row, mapping) {
+  const dateCell = mapping.date !== undefined ? row[mapping.date] || "" : "";
+  const descCell = mapping.desc !== undefined ? row[mapping.desc] || "" : "";
+  return OCR_SUMMARY_ROW_HINT_RE.test(`${dateCell} ${descCell}`.trim());
+}
+
+// OCR 把数字识别错（多认/漏认一位数字、逗号看成小数点等）时，经常会产出
+// 金额大到离谱（比如几千万/几十亿）或者日期离谱（年份变成 0113）的
+// "交易"。这类明显不合理的值不如直接清空，让它们走"日期/金额未能识别"
+// 的人工核对提示，比直接把一个错得很离谱的数字混进汇总里更安全。
+function sanitizeOcrTransaction(t) {
+  let amountSuspect = false;
+  let dateSuspect = false;
+  if (t.amount !== null && Math.abs(t.amount) > 1000000) {
+    t.amount = null;
+    amountSuspect = true;
+  }
+  if (t.date_iso) {
+    const year = +t.date_iso.slice(0, 4);
+    const maxYear = new Date().getFullYear() + 2;
+    if (year < 2015 || year > maxYear) {
+      t.date_iso = null;
+      dateSuspect = true;
+    }
+  }
+  return { tx: t, amountSuspect, dateSuspect };
+}
+
+// OCR 按视觉行还原表格时，一笔交易如果描述换行成多行，每一行都会被当成
+// 单独一行（后续行没有日期也没有金额），这里把这些"纯描述续行"合并回
+// 上一笔真正的交易里，避免产出一堆有描述没金额的空交易。
+function mergeOcrContinuationRows(transactions) {
+  const merged = [];
+  for (const t of transactions) {
+    const isContinuation = !t.date_iso && t.amount === null && t.description && t.description !== "(无描述)";
+    if (isContinuation && merged.length) {
+      const prev = merged[merged.length - 1];
+      prev.description = `${prev.description} ${t.description}`.trim().slice(0, 200);
+      continue;
+    }
+    merged.push(t);
+  }
+  return merged;
+}
+
+async function ocrRecognizePage(worker, page, pageIdx, onProgress) {
+  const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d");
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  if (onProgress) onProgress(pageIdx);
+  const { data } = await worker.recognize(canvas, {}, { tsv: true });
+  return parseOcrTsv(data.tsv);
+}
+
+// 整份 PDF 都没有文字层（典型的扫描件）时的 OCR 兜底解析入口。
+async function parseScannedPdfOcr(doc) {
+  const warnings = [
+    "该 PDF 没有可提取的文字层（很可能是扫描件/图片），已启用 OCR 文字识别，" +
+      "识别结果可能存在错行、错字、金额识别错误等问题，务必仔细核对每一条记录。",
+  ];
+
+  if (!ocrAvailable) {
+    warnings.push(
+      "OCR 引擎未加载成功（vendor/tesseract 文件夹可能缺失或不完整），本次未能自动识别任何内容，请手动在网页上添加交易记录。"
+    );
+    return { account: extractAccountInfo(""), transactions: [], warnings };
+  }
+
+  let worker;
+  try {
+    worker = await getOcrWorker();
+  } catch (e) {
+    warnings.push(
+      "OCR 引擎初始化失败：" + e.message + "（如果是双击直接打开本文件，部分浏览器会限制加载本地的 OCR 语言" +
+        "数据/WASM 核心文件，可以试试改用本地静态服务器打开，见 README 说明）。"
+    );
+    return { account: extractAccountInfo(""), transactions: [], warnings };
+  }
+
+  let transactions = [];
+  const allTextParts = [];
+  let tableFound = false;
+  let suspectAmountCount = 0;
+  let suspectDateCount = 0;
+
+  for (let pageIdx = 1; pageIdx <= doc.numPages; pageIdx++) {
+    setStatus(parseStatus, `OCR 识别中…第 ${pageIdx}/${doc.numPages} 页（扫描件识别较慢，请耐心等待）`);
+    let words;
+    try {
+      const page = await doc.getPage(pageIdx);
+      words = await ocrRecognizePage(worker, page, pageIdx);
+    } catch (e) {
+      warnings.push(`第 ${pageIdx} 页 OCR 识别失败：${e.message}`);
+      continue;
+    }
+
+    const lines = groupOcrWordsIntoLines(words);
+    allTextParts.push(lines.map((line) => line.map((w) => w.text).join(" ")).join("\n"));
+
+    const table = reconstructTableFromOcr(lines);
+    if (table) {
+      tableFound = true;
+      const pageTxs = [];
+      for (let i = 1; i < table.rows.length; i++) {
+        if (looksLikeOcrSummaryRow(table.rows[i], table.mapping)) continue;
+        const tx = rowToTransaction(table.rows[i], table.mapping, `ocr-p${pageIdx}`);
+        if (tx) {
+          const { tx: sanitized, amountSuspect, dateSuspect } = sanitizeOcrTransaction(tx);
+          if (amountSuspect) suspectAmountCount++;
+          if (dateSuspect) suspectDateCount++;
+          pageTxs.push(sanitized);
+        }
+      }
+      transactions = transactions.concat(mergeOcrContinuationRows(pageTxs));
+    }
+  }
+
+  const fullText = allTextParts.join("\n");
+  const account = extractAccountInfo(fullText);
+
+  if (!tableFound) {
+    warnings.push("OCR 识别出了文字，但未能在其中定位到规整的交易表格，暂不支持这种版式的扫描件，请手动添加交易记录。");
+  }
+  if (!transactions.length) {
+    warnings.push("未能从 OCR 结果里提取到任何交易记录，请在网页上手动添加。");
+  }
+
+  const noDateCount = transactions.filter((t) => !t.date_iso).length;
+  if (noDateCount) {
+    warnings.push(`有 ${noDateCount} 条记录的日期未能自动识别，请手动填写（OCR 对扫描件的日期数字容易识别出错，务必核对）。`);
+  }
+  if (suspectDateCount) {
+    warnings.push(`有 ${suspectDateCount} 条记录识别出的日期明显不合理（如年份错乱），已清空为待填写，请手动核对。`);
+  }
+  if (suspectAmountCount) {
+    warnings.push(`有 ${suspectAmountCount} 条记录识别出的金额明显不合理（数值离谱地大，很可能是数字识别错误），已清空为待填写，请对照原图手动核对。`);
+  }
+
+  // OCR 对单个数字的识别错误（比如漏看/多看一位数字、小数点位置错了）往往
+  // 不会大到被前面的"离谱金额"过滤器拦下来，但累积起来还是会让所有交易
+  // 金额的加总明显偏离对账单本身打印的期初/期末余额差——这是一个比"肉眼
+  // 抽查几条"更可靠的整体质量信号，加总差得离谱就要明确提醒用户不要直接
+  // 相信这份 OCR 结果的金额，务必对照原图逐条核对。
+  if (account.opening_balance !== null && account.closing_balance !== null) {
+    const expectedNet = account.closing_balance - account.opening_balance;
+    const actualNet = transactions.reduce((s, t) => s + (t.amount !== null ? t.amount : 0), 0);
+    const diff = Math.abs(actualNet - expectedNet);
+    if (diff > Math.max(500.0, Math.abs(expectedNet) * 0.05)) {
+      warnings.push(
+        `警告：逐条交易金额加总（约 ${actualNet.toFixed(2)}）与对账单本身期初/期末余额算出的应有净变动` +
+          `（${expectedNet.toFixed(2)}）相差较大，说明 OCR 识别出的金额很可能有明显错误，请不要直接信任逐条金额，` +
+          `务必对照原始 PDF 图片仔细核对每一笔。`
+      );
+    }
+  }
+
+  return { account, transactions, warnings };
+}
+
+async function parsePdf(arrayBuffer) {
+  const warnings = [];
+  const doc = await pdfjsLib.getDocument({
+    data: arrayBuffer,
+    cMapUrl: "./vendor/pdfjs/cmaps/",
+    cMapPacked: true,
+  }).promise;
+
+  let transactions = [];
+  let tableFound = false;
+  const allText = [];
+  const allFlatText = [];
+
+  for (let pageIdx = 1; pageIdx <= doc.numPages; pageIdx++) {
+    const page = await doc.getPage(pageIdx);
+    const { lines, fullText, flatText } = await extractPageLines(page);
+    allText.push(fullText);
+    allFlatText.push(flatText);
+
+    const table = reconstructTable(lines);
+    if (table) {
+      tableFound = true;
+      for (let i = 1; i < table.rows.length; i++) {
+        const tx = rowToTransaction(table.rows[i], table.mapping, `p${pageIdx}`);
+        if (tx) transactions.push(tx);
+      }
+    }
+  }
+
+  const fullText = allText.join("\n");
+  const flatText = allFlatText.join(" ");
+
+  // 整份 PDF 都提取不出任何文字，基本可以判定是扫描件/图片型 PDF（没有
+  // 文字层，PDF.js 天然提取不到任何文本内容），这种情况下前面的表格/文本
+  // 解析注定一无所获，改用 OCR 兜底（见上方"1d. OCR 扫描件解析"），而不是
+  // 继续往下走。
+  if (!fullText.trim() && !flatText.trim()) {
+    return await parseScannedPdfOcr(doc);
+  }
+
+  const account = extractAccountInfo(fullText);
+
+  // 有些 PDF（尤其美式银行对账单）虽然会被表格重建逻辑“找到”一个貌似规整的
+  // 表头（比如叙述性小节里恰好出现"DATE DESCRIPTION AMOUNT"字样），但实际
+  // 内容是分节叙述式文本，逐行硬套列位置会产生大量日期/金额缺失的垃圾行。
+  // 因此这里不只看“有没有找到表格”，而是比较两种解析方式各自产出的“有效
+  // 交易数”（日期和金额都成功识别的记录数），选质量更好的一份。
+  const validCount = (list) => list.filter((t) => t.date_iso && t.amount !== null && !Number.isNaN(t.amount)).length;
+  const tableValidCount = tableFound ? validCount(transactions) : -1;
+  const sectioned = parseSectionedStatement(fullText, account);
+  const sectionedValidCount = validCount(sectioned);
+  // 有些信用社/银行把交易列表排成左右两栏（表头形如 "Date Description
+  // Amount Date Description Amount"），这是最强的结构信号：一旦命中，
+  // 优先采用专门的双栏解析结果，因为按 y 坐标分行的表格重建和单栏分节
+  // 解析都会把同一视觉行里的两笔交易错误拼接在一起。
+  const looksTwoColumn = looksLikeTwoColumnStatement(flatText);
+  const twoColumn = looksTwoColumn ? parseTwoColumnStatement(flatText, account) : [];
+  const twoColumnValidCount = validCount(twoColumn);
+  // 全文里出现了我们认识的“存款/支票/扣款”类小节标题，就当作强信号：这是
+  // 分节叙述式对账单，直接采用分节解析结果，不再跟表格重建的结果比数量——
+  // 因为叙述式 PDF 的表头文字（如 "Date Description Amount"）在每一页顶部都
+  // 重复出现，很容易被逐页表格重建逻辑误当成一份“规整表格”，进而把说明性
+  // 续行也拆成一行、甚至把页码/账号里的数字误拼成天文数字般的金额。
+  const upperFullText = fullText.toUpperCase();
+  const looksSectioned = Object.keys(SECTION_SIGN).some((h) => upperFullText.includes(h));
+
+  // 双栏表头有时会被“误触发”（比如某个小节恰好没有任何交易，导致上一个
+  // 小节的表头和下一个小节的表头紧挨在一起，凑成了看起来像双栏的表头文
+  // 字），所以不能只要检测到双栏表头就无条件采用双栏解析结果，还要确认
+  // 它确实比另外两种解析方式产出的有效交易更多/至少一样多，否则宁可用
+  // 效果更好的那一种。
+  if (twoColumnValidCount > 0 && twoColumnValidCount >= Math.max(tableValidCount, sectionedValidCount)) {
+    transactions = twoColumn;
+    if (!tableFound || tableValidCount <= 0) {
+      warnings.push("识别到左右两栏排版的交易列表，已按“日期/描述/金额”双栏格式解析，请重点核对交易日期的年份是否正确。");
+    }
+  } else if (sectionedValidCount > 0 && (looksSectioned || sectionedValidCount >= tableValidCount)) {
+    transactions = sectioned;
+    if (!tableFound || tableValidCount <= 0) {
+      warnings.push("未能识别出规整的交易表格，已按“存款/支票/扣款”等分节文本格式解析，请重点核对交易日期的年份和金额正负是否正确。");
+    }
+  } else if (!tableFound || tableValidCount <= 0) {
+    warnings.push("未能在 PDF 中识别出规整的交易表格，已切换为按文本行兜底解析，建议仔细核对结果。");
+    transactions = parseLinesFallback(fullText);
+  }
+
+  if (!transactions.length) {
+    warnings.push("未能自动提取到任何交易记录，请在下方手动添加。");
+  }
+
+  const noDateCount = transactions.filter((t) => !t.date_iso).length;
+  if (noDateCount) {
+    warnings.push(`有 ${noDateCount} 条记录的日期未能自动识别，请手动填写。`);
+  }
+
+  return { account, transactions, warnings };
+}
+
+/* =========================================================================
+ * 2. QFX 生成（对应 Python 版 app/qfx.py）
+ * ========================================================================= */
+
+function simpleHash(str) {
+  // 不需要密码学强度，只需要对同一交易生成稳定、大概率唯一的 FITID。
+  let h1 = 0xdeadbeef ^ str.length;
+  let h2 = 0x41c6ce57 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hex = (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+  return hex.toUpperCase();
+}
+
+function makeFitid(accountNumber, tx, index) {
+  const base = tx.ref
+    ? `${accountNumber}-${tx.ref}`
+    : `${accountNumber}-${tx.date}-${tx.description}-${tx.amount.toFixed(2)}-${index}`;
+  return simpleHash(base);
+}
+
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function fmtDate(iso, fallback) {
+  if (!iso) return fallback;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return fallback;
+  return m[1] + m[2] + m[3];
+}
+
+function fmtAmount(v) { return v.toFixed(2); }
+
+function nowStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+}
+
+function buildQfx(account, transactions) {
+  const now = nowStamp();
+  const dated = transactions.filter((t) => t.date);
+  let dtStart = dated.length ? dated.map((t) => t.date).sort()[0].replace(/-/g, "") : now.slice(0, 8);
+  let dtEnd = dated.length ? dated.map((t) => t.date).sort().slice(-1)[0].replace(/-/g, "") : now.slice(0, 8);
+  if (account.statement_start) dtStart = fmtDate(account.statement_start, dtStart);
+  if (account.statement_end) dtEnd = fmtDate(account.statement_end, dtEnd);
+
+  const lines = [];
+  lines.push("OFXHEADER:100");
+  lines.push("DATA:OFXSGML");
+  lines.push("VERSION:102");
+  lines.push("SECURITY:NONE");
+  lines.push("ENCODING:UTF-8");
+  lines.push("CHARSET:NONE");
+  lines.push("COMPRESSION:NONE");
+  lines.push("OLDFILEUID:NONE");
+  lines.push("NEWFILEUID:NONE");
+  lines.push("");
+  lines.push("<OFX>");
+  lines.push("<SIGNONMSGSRSV1>");
+  lines.push("<SONRS>");
+  lines.push("<STATUS>");
+  lines.push("<CODE>0");
+  lines.push("<SEVERITY>INFO");
+  lines.push("</STATUS>");
+  lines.push(`<DTSERVER>${now}`);
+  lines.push("<LANGUAGE>ENG");
+  if (account.bank_name) {
+    lines.push("<FI>");
+    lines.push(`<ORG>${escapeXml(account.bank_name)}`);
+    if (account.bank_id) lines.push(`<FID>${escapeXml(account.bank_id)}`);
+    lines.push("</FI>");
+  }
+  lines.push("</SONRS>");
+  lines.push("</SIGNONMSGSRSV1>");
+
+  const isCc = account.account_type === "CC";
+  if (isCc) {
+    lines.push("<CREDITCARDMSGSRSV1>");
+    lines.push("<CCSTMTTRNRS>");
+    lines.push("<TRNUID>1");
+    lines.push("<STATUS>"); lines.push("<CODE>0"); lines.push("<SEVERITY>INFO"); lines.push("</STATUS>");
+    lines.push("<CCSTMTRS>");
+    lines.push(`<CURDEF>${account.currency}`);
+    lines.push("<CCACCTFROM>");
+    lines.push(`<ACCTID>${escapeXml(account.account_number)}`);
+    lines.push("</CCACCTFROM>");
+  } else {
+    lines.push("<BANKMSGSRSV1>");
+    lines.push("<STMTTRNRS>");
+    lines.push("<TRNUID>1");
+    lines.push("<STATUS>"); lines.push("<CODE>0"); lines.push("<SEVERITY>INFO"); lines.push("</STATUS>");
+    lines.push("<STMTRS>");
+    lines.push(`<CURDEF>${account.currency}`);
+    lines.push("<BANKACCTFROM>");
+    lines.push(`<BANKID>${escapeXml(account.bank_id || "000000000")}`);
+    lines.push(`<ACCTID>${escapeXml(account.account_number)}`);
+    lines.push(`<ACCTTYPE>${account.bank_acct_type || "CHECKING"}`);
+    lines.push("</BANKACCTFROM>");
+  }
+
+  lines.push("<BANKTRANLIST>");
+  lines.push(`<DTSTART>${dtStart}`);
+  lines.push(`<DTEND>${dtEnd}`);
+
+  transactions.forEach((tx, idx) => {
+    const trntype = tx.amount >= 0 ? "CREDIT" : "DEBIT";
+    const dtposted = fmtDate(tx.date, dtEnd);
+    const fitid = makeFitid(account.account_number, tx, idx);
+    const name = escapeXml((tx.description || "").trim() || "TRANSACTION").slice(0, 120);
+    lines.push("<STMTTRN>");
+    lines.push(`<TRNTYPE>${trntype}`);
+    lines.push(`<DTPOSTED>${dtposted}`);
+    lines.push(`<TRNAMT>${fmtAmount(tx.amount)}`);
+    lines.push(`<FITID>${fitid}`);
+    lines.push(`<NAME>${name}`);
+    lines.push("</STMTTRN>");
+  });
+
+  lines.push("</BANKTRANLIST>");
+
+  if (account.closing_balance !== null && account.closing_balance !== undefined && !Number.isNaN(account.closing_balance)) {
+    lines.push("<LEDGERBAL>");
+    lines.push(`<BALAMT>${fmtAmount(account.closing_balance)}`);
+    lines.push(`<DTASOF>${dtEnd}`);
+    lines.push("</LEDGERBAL>");
+  }
+
+  if (isCc) {
+    lines.push("</CCSTMTRS>"); lines.push("</CCSTMTTRNRS>"); lines.push("</CREDITCARDMSGSRSV1>");
+  } else {
+    lines.push("</STMTRS>"); lines.push("</STMTTRNRS>"); lines.push("</BANKMSGSRSV1>");
+  }
+
+  lines.push("</OFX>");
+  return lines.join("\n") + "\n";
+}
+
+/* =========================================================================
+ * 3. 页面交互逻辑
+ * ========================================================================= */
+
+const el = (id) => document.getElementById(id);
+
+const parseBtn = el("parseBtn");
+const parseStatus = el("parseStatus");
+const warningsBox = el("warnings");
+
+const accountSection = el("accountSection");
+const txSection = el("txSection");
+const generateSection = el("generateSection");
+
+const accountTypeSel = el("accountType");
+const bankAcctTypeWrap = el("bankAcctTypeWrap");
+const bankIdWrap = el("bankIdWrap");
+
+const txBody = el("txBody");
+const txSummary = el("txSummary");
+const addRowBtn = el("addRowBtn");
+
+const generateBtn = el("generateBtn");
+const generateStatus = el("generateStatus");
+
+function setStatus(node, text, cls) {
+  node.textContent = text || "";
+  node.className = "status" + (cls ? " " + cls : "");
+}
+
+function toggleAccountFields() {
+  const isBank = accountTypeSel.value === "BANK";
+  bankAcctTypeWrap.classList.toggle("hidden", !isBank);
+  bankIdWrap.classList.toggle("hidden", !isBank);
+}
+accountTypeSel.addEventListener("change", toggleAccountFields);
+toggleAccountFields();
+
+function fillAccountForm(account) {
+  el("bankName").value = account.bank_name || "";
+  accountTypeSel.value = account.account_type_guess === "CC" ? "CC" : "BANK";
+  el("accountNumber").value = account.account_number || "";
+  el("bankId").value = account.bank_id || "";
+  el("currency").value = account.currency || "CNY";
+  el("statementStart").value = account.statement_start || "";
+  el("statementEnd").value = account.statement_end || "";
+  el("openingBalance").value = account.opening_balance ?? "";
+  el("closingBalance").value = account.closing_balance ?? "";
+  toggleAccountFields();
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function makeRow(tx) {
+  tx = tx || { date_iso: "", description: "", amount: "", balance: "", ref: "" };
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="date" class="f-date" value="${tx.date_iso || ""}"></td>
+    <td class="row-desc"><input type="text" class="f-desc" value="${escapeAttr(tx.description || "")}"></td>
+    <td><input type="number" step="0.01" class="f-amount" value="${tx.amount ?? ""}"></td>
+    <td><input type="number" step="0.01" class="f-balance" value="${tx.balance ?? ""}" tabindex="-1"></td>
+    <td><input type="text" class="f-ref" value="${escapeAttr(tx.ref || "")}"></td>
+    <td><button type="button" class="remove-btn">删除</button></td>
+  `;
+  tr.querySelector(".remove-btn").addEventListener("click", () => { tr.remove(); updateSummary(); });
+  tr.querySelectorAll("input").forEach((inp) => inp.addEventListener("input", updateSummary));
+  return tr;
+}
+
+function renderTransactions(transactions) {
+  txBody.innerHTML = "";
+  transactions.forEach((tx) => txBody.appendChild(makeRow(tx)));
+  updateSummary();
+}
+
+function updateSummary() {
+  const rows = Array.from(txBody.querySelectorAll("tr"));
+  let sum = 0;
+  let invalid = 0;
+  rows.forEach((tr) => {
+    const date = tr.querySelector(".f-date").value;
+    const amount = parseFloat(tr.querySelector(".f-amount").value);
+    const ok = !!date && !Number.isNaN(amount);
+    tr.classList.toggle("invalid", !ok);
+    if (!ok) invalid += 1;
+    if (!Number.isNaN(amount)) sum += amount;
+  });
+  txSummary.textContent = `共 ${rows.length} 条记录，合计金额 ${sum.toFixed(2)}` +
+    (invalid ? `，其中 ${invalid} 条日期/金额不完整（已高亮标红）` : "");
+  txSummary.className = "status" + (invalid ? " error" : " ok");
+}
+
+addRowBtn.addEventListener("click", () => { txBody.appendChild(makeRow()); updateSummary(); });
+
+parseBtn.addEventListener("click", async () => {
+  const fileInput = el("pdfFile");
+  const file = fileInput.files[0];
+  if (!file) { setStatus(parseStatus, "请先选择一个 PDF 文件。", "error"); return; }
+  if (!pdfjsLib) { setStatus(parseStatus, "PDF 引擎未加载成功，请检查 vendor/pdfjs 文件夹是否完整。", "error"); return; }
+
+  setStatus(parseStatus, "解析中…（表格较多的对账单可能需要几秒）");
+  parseBtn.disabled = true;
+  warningsBox.classList.add("hidden");
+  warningsBox.innerHTML = "";
+
+  try {
+    const buf = await file.arrayBuffer();
+    const data = await parsePdf(buf);
+
+    fillAccountForm(data.account);
+    renderTransactions(data.transactions);
+
+    if (data.warnings && data.warnings.length) {
+      warningsBox.innerHTML = "<strong>提示：</strong><ul>" +
+        data.warnings.map((w) => `<li>${escapeAttr(w)}</li>`).join("") + "</ul>";
+      warningsBox.classList.remove("hidden");
+    }
+
+    accountSection.classList.remove("hidden");
+    txSection.classList.remove("hidden");
+    generateSection.classList.remove("hidden");
+    setStatus(parseStatus, `解析完成，共提取 ${data.transactions.length} 条交易记录，请核对下方信息。`, "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus(parseStatus, "解析失败：" + e.message, "error");
+  } finally {
+    parseBtn.disabled = false;
+  }
+});
+
+generateBtn.addEventListener("click", () => {
+  const rows = Array.from(txBody.querySelectorAll("tr"));
+  const transactions = [];
+  for (let i = 0; i < rows.length; i++) {
+    const tr = rows[i];
+    const date = tr.querySelector(".f-date").value;
+    const amountStr = tr.querySelector(".f-amount").value;
+    const description = tr.querySelector(".f-desc").value;
+    const ref = tr.querySelector(".f-ref").value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setStatus(generateStatus, `第 ${i + 1} 条记录日期格式不对，应为 YYYY-MM-DD。`, "error");
+      return;
+    }
+    const amount = parseFloat(amountStr);
+    if (Number.isNaN(amount)) {
+      setStatus(generateStatus, `第 ${i + 1} 条记录金额不是合法数字。`, "error");
+      return;
+    }
+    transactions.push({ date, description: description.trim() || "TRANSACTION", amount, ref: ref || null });
+  }
+  if (!transactions.length) {
+    setStatus(generateStatus, "没有交易记录，请至少保留一条。", "error");
+    return;
+  }
+
+  const accountType = accountTypeSel.value;
+  const accountNumber = el("accountNumber").value.trim();
+  if (!accountNumber) {
+    setStatus(generateStatus, "请填写账号。", "error");
+    return;
+  }
+  const currency = (el("currency").value || "CNY").trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    setStatus(generateStatus, "币种需为 3 位字母代码，如 CNY、USD。", "error");
+    return;
+  }
+
+  const account = {
+    account_type: accountType,
+    account_number: accountNumber,
+    bank_id: el("bankId").value.trim(),
+    bank_acct_type: (el("bankAcctType").value || "CHECKING").toUpperCase(),
+    currency,
+    bank_name: el("bankName").value.trim(),
+    statement_start: el("statementStart").value || null,
+    statement_end: el("statementEnd").value || null,
+    closing_balance: el("closingBalance").value ? parseFloat(el("closingBalance").value) : null,
+  };
+
+  try {
+    const qfxText = buildQfx(account, transactions);
+    const blob = new Blob(["\uFEFF" + qfxText], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (accountNumber || "statement") + ".qfx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus(generateStatus, "已生成并下载 QFX 文件。", "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus(generateStatus, "生成失败：" + e.message, "error");
+  }
+});
+</script>
+</body>
+</html>

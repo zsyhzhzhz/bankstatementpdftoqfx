@@ -1,0 +1,10 @@
+{
+  "name": "bank-statement-ocr",
+  "private": true,
+  "version": "1.0.0",
+  "description": "供 Python 端调用的 OCR 小工具：用 tesseract.js 识别扫描版银行对账单图片，输出带坐标的单词 JSON。",
+  "main": "recognize.js",
+  "dependencies": {
+    "tesseract.js": "^7.0.0"
+  }
+}

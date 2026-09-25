@@ -1,0 +1,7 @@
+Flask==3.0.3
+pdfplumber==0.11.4
+python-dateutil==2.9.0.post0
+# 扫描件 PDF 的 OCR 兜底功能需要用它把 PDF 页面渲染成图片（不需要额外
+# 安装 poppler/pdftoppm 等系统命令）；OCR 引擎本身用的是 app/ocr_node/
+# 目录下的 tesseract.js（Node.js），运行前请先在该目录执行 `npm install`。
+pymupdf==1.26.5

@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+samples/*.pdf
+samples/*.qfx
+.DS_Store
+
+# PDF/ 是本地放真实银行对账单样本的目录，内容通常是真实的账户/交易
+# 信息，绝对不能进公开仓库（哪怕之后删除，git 历史里也会永久留底）。
+PDF/
+# OCR 功能（app/ocr.py）用到的 Node 依赖和自动下载的语言训练数据，
+# 体积较大且可以随时用 `npm install` / 首次运行时自动重新获取，不入库。
+app/ocr_node/node_modules/
+app/ocr_node/*.traineddata

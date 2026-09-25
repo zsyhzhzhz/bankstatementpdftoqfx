@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对账单 PDF 转 QFX</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <h1>银行对账单 PDF → QFX 转换器</h1>
+  <p class="subtitle">上传 PDF 对账单，自动提取交易记录，核对/修正后生成可导入 Quicken 等软件的 QFX 文件。</p>
+
+  <section class="card">
+    <h2>① 上传 PDF</h2>
+    <div class="upload-row">
+      <input type="file" id="pdfFile" accept="application/pdf">
+      <button id="parseBtn">解析 PDF</button>
+      <span id="parseStatus" class="status"></span>
+    </div>
+    <div id="warnings" class="warnings hidden"></div>
+  </section>
+
+  <section class="card hidden" id="accountSection">
+    <h2>② 核对账户信息</h2>
+    <div class="grid">
+      <label>银行名称
+        <input type="text" id="bankName">
+      </label>
+      <label>账户类型
+        <select id="accountType">
+          <option value="BANK">储蓄卡 / 借记卡（BANK）</option>
+          <option value="CC">信用卡（CC）</option>
+        </select>
+      </label>
+      <label id="bankAcctTypeWrap">账户子类型
+        <select id="bankAcctType">
+          <option value="CHECKING">CHECKING（活期/借记）</option>
+          <option value="SAVINGS">SAVINGS（储蓄）</option>
+        </select>
+      </label>
+      <label>账号 *
+        <input type="text" id="accountNumber" placeholder="必填">
+      </label>
+      <label id="bankIdWrap">联行号/开户行代码
+        <input type="text" id="bankId" placeholder="可留空，储蓄卡建议填写">
+      </label>
+      <label>币种
+        <input type="text" id="currency" value="CNY" maxlength="3">
+      </label>
+      <label>账单开始日期
+        <input type="date" id="statementStart">
+      </label>
+      <label>账单结束日期
+        <input type="date" id="statementEnd">
+      </label>
+      <label>期初余额
+        <input type="number" step="0.01" id="openingBalance">
+      </label>
+      <label>期末余额
+        <input type="number" step="0.01" id="closingBalance">
+      </label>
+    </div>
+  </section>
+
+  <section class="card hidden" id="txSection">
+    <h2>③ 核对/修正交易记录</h2>
+    <p class="hint">金额：收入/存入为正数，支出/取出为负数（负号）。请逐行核对，可直接编辑或增删。</p>
+    <div class="table-wrap">
+      <table id="txTable">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>描述</th>
+            <th>金额</th>
+            <th>余额（参考）</th>
+            <th>参考号</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="txBody"></tbody>
+      </table>
+    </div>
+    <div class="table-actions">
+      <button id="addRowBtn" type="button">+ 添加一行</button>
+      <span id="txSummary" class="status"></span>
+    </div>
+  </section>
+
+  <section class="card hidden" id="generateSection">
+    <h2>④ 生成 QFX</h2>
+    <button id="generateBtn">生成并下载 QFX</button>
+    <span id="generateStatus" class="status"></span>
+  </section>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
