@@ -63,6 +63,37 @@ button:disabled { background: #9ca3af; cursor: not-allowed; }
 
 .hidden { display: none !important; }
 
+#loginOverlay {
+  position: fixed;
+  inset: 0;
+  background: #f4f5f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+#loginOverlay .login-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 28px 32px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  width: 100%;
+  max-width: 320px;
+}
+#loginOverlay h2 { margin: 0 0 6px; font-size: 18px; }
+#loginOverlay p { margin: 0 0 16px; font-size: 13px; color: #6b7280; }
+#loginOverlay input {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+}
+#loginOverlay button { width: 100%; padding: 9px; margin-top: 4px; }
+#loginOverlay .login-error { color: #dc2626; font-size: 13px; margin-top: 8px; min-height: 16px; }
+
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 18px; }
 
 .grid label { display: flex; flex-direction: column; font-size: 13px; color: #374151; gap: 4px; }
@@ -119,7 +150,23 @@ tbody tr.invalid td { background: #fef2f2; }
 </style>
 </head>
 <body>
-<div class="container">
+
+<!-- 简单的登录门（客户端本地校验用户名/密码），仅用于挡住随手打开链接的
+     访客；这是纯静态页面，没有后端，任何能看懂 JS 的人都能在浏览器里
+     绕过这一层，所以它不能防住真正想绕过的人，只适合"挡挡陌生人"这种
+     场景，不要拿它保护真正敏感的数据。 -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <h2>请先登录</h2>
+    <p>本工具在浏览器本地处理 PDF，登录状态只保存在你自己的浏览器里。</p>
+    <input type="text" id="loginUser" placeholder="用户名" autocomplete="username">
+    <input type="password" id="loginPass" placeholder="密码" autocomplete="current-password">
+    <button id="loginBtn">登录</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<div class="container hidden" id="appContainer">
   <h1>银行对账单 PDF → QFX 转换器（单文件离线版）</h1>
   <p class="subtitle">全部在浏览器本地完成解析和生成，PDF 不会上传到任何服务器。上传 PDF → 核对/修正 → 生成 QFX。</p>
   <p class="offline-note">本文件依赖同目录下的 <code>vendor/pdfjs/</code> 文件夹（PDF 解析引擎），请勿单独移动 index.html，需连同整个项目文件夹一起复制/分发。</p>
@@ -233,6 +280,44 @@ try {
 // vendor/tesseract/tesseract.min.js）；如果没加载成功，遇到扫描件时会
 // 明确提示用户，而不是静默什么都不做。
 const ocrAvailable = typeof window.Tesseract !== "undefined";
+
+/* =========================================================================
+ * -1. 简单的登录门（纯客户端本地校验，仅用于挡住随手打开链接的陌生访客）
+ *
+ * 注意：这是一个纯静态页面，没有后端服务器，用户名/密码是写在这份公开
+ * 代码里的，任何打开浏览器开发者工具、直接看源码/看 GitHub 仓库的人都
+ * 能绕过这一步——它挡不住真正想绕过的人，只适合"不想让随便点进来的陌生
+ * 人直接用"这种低强度场景，不要用来保护真正敏感的数据。
+ * ========================================================================= */
+const LOGIN_USER = "shanyizhao";
+const LOGIN_PASS = "123456";
+const LOGIN_STORAGE_KEY = "pdf2qfx_logged_in";
+
+function showApp() {
+  document.getElementById("loginOverlay").classList.add("hidden");
+  document.getElementById("appContainer").classList.remove("hidden");
+}
+
+if (localStorage.getItem(LOGIN_STORAGE_KEY) === "1") {
+  showApp();
+} else {
+  document.getElementById("loginBtn").addEventListener("click", () => {
+    const user = document.getElementById("loginUser").value.trim();
+    const pass = document.getElementById("loginPass").value;
+    const errEl = document.getElementById("loginError");
+    if (user === LOGIN_USER && pass === LOGIN_PASS) {
+      localStorage.setItem(LOGIN_STORAGE_KEY, "1");
+      errEl.textContent = "";
+      showApp();
+    } else {
+      errEl.textContent = "用户名或密码不对，请再试一次。";
+    }
+  });
+  // 密码框里按回车也能提交，不用非得点鼠标
+  document.getElementById("loginPass").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("loginBtn").click();
+  });
+}
 
 /* =========================================================================
  * 1. 解析逻辑（对应 Python 版 app/parser.py，移植为浏览器端 JS）
